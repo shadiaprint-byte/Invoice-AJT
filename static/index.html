@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>QuickInvoice</title>
+<link rel="stylesheet" href="/style.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%234f46e5'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white' font-family='Arial'>Q</text></svg>" />
+</head>
+<body>
+<div id="login-screen" class="login-screen hidden">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="logo-mark">Q</div>
+      <div>
+        <h1>QuickInvoice</h1>
+        <p class="muted">Invoicing · Quotations · Stock</p>
+      </div>
+    </div>
+    <form id="login-form" class="login-form">
+      <label>Email</label>
+      <input type="email" id="login-email" placeholder="you@company.com" autocomplete="username" required />
+      <label>Password</label>
+      <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" required />
+      <div id="login-error" class="error-msg hidden"></div>
+      <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+    </form>
+    <div class="login-hint muted">
+      <strong>Sign in</strong> with your email and password.<br/>
+      Contact your administrator if you've forgotten your credentials.
+    </div>
+  </div>
+</div>
+
+<div id="app" class="app hidden">
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="logo-mark">Q</div>
+      <div class="brand-text">
+        <strong>QuickInvoice</strong>
+        <span class="muted small" id="sidebar-company"></span>
+      </div>
+    </div>
+    <nav class="nav">
+      <a href="#/dashboard" data-nav="dashboard" class="nav-link"><span class="ico">▦</span> Dashboard</a>
+      <a href="#/invoices" data-nav="invoices" class="nav-link"><span class="ico">▤</span> Invoices</a>
+      <a href="#/quotes" data-nav="quotes" class="nav-link"><span class="ico">▥</span> Quotations</a>
+      <a href="#/customers" data-nav="customers" class="nav-link"><span class="ico">◉</span> Customers</a>
+      <a href="#/products" data-nav="products" class="nav-link"><span class="ico">▣</span> Products &amp; Stock</a>
+      <a href="#/payments" data-nav="payments" class="nav-link"><span class="ico">◈</span> Payments</a>
+      <a href="#/expenses" data-nav="expenses" class="nav-link"><span class="ico">◈</span> Expenses</a>
+      <a href="#/reports" data-nav="reports" class="nav-link"><span class="ico">▦</span> Reports</a>
+      <a href="#/settings" data-nav="settings" class="nav-link admin-only"><span class="ico">⚙</span> Settings</a>
+      <a href="#/users" data-nav="users" class="nav-link admin-only"><span class="ico">◈</span> Users</a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-chip">
+        <div class="avatar" id="user-avatar">A</div>
+        <div class="user-meta">
+          <strong id="user-name">…</strong>
+          <span class="muted small" id="user-role">…</span>
+        </div>
+        <button class="icon-btn" id="logout-btn" title="Sign out">⏻</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div id="toast" class="toast hidden"></div>
+    <div id="view"></div>
+  </main>
+</div>
+
+<div id="modal-root"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
