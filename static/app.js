@@ -48,11 +48,13 @@ async function api(path, opts = {}) {
     // Network failure — server unreachable (not an auth problem)
     throw new Error("Cannot reach the server. Please refresh the page and try again.");
   }
-  if (res.status === 401) {
+  const data = await res.json().catch(() => ({}));
+  // Only treat 401 as "session expired" for authenticated requests.
+  // A failed LOGIN (also 401) should show "invalid email or password".
+  if (res.status === 401 && path !== "/login") {
     logout();
     throw new Error("Session expired — please sign in again.");
   }
-  const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Request failed");
   return data;
 }
@@ -105,6 +107,7 @@ const routes = {
   products: renderProducts,
   payments: renderPayments,
   expenses: renderExpenses,
+  statement: renderStatement,
   reports: renderReports,
   settings: renderSettings,
   users: renderUsers,
@@ -124,21 +127,37 @@ function navigate() {
   // admin-only visibility
   const isAdmin = state.user?.role === "admin";
   $$(".admin-only").forEach((a) => a.classList.toggle("hidden", !isAdmin));
-  fn(parts.slice(1));
+  try {
+    const result = fn(parts.slice(1));
+    // If the route returns a promise, surface any rejection clearly.
+    if (result && typeof result.catch === "function") {
+      result.catch((e) => showFatal(e));
+    }
+  } catch (e) {
+    showFatal(e);
+  }
+}
+
+function showFatal(e) {
+  const msg = (e && (e.message || e)) || "Unknown error";
+  const stack = (e && e.stack) || "";
+  console.error("Route error:", e);
+  const el = $("#view");
+  if (el) {
+    el.innerHTML = `<div class="card" style="margin:20px"><div class="empty">
+      <div class="big">⚠️</div><h3>Something went wrong</h3>
+      <p class="muted" style="word-break:break-word;max-width:640px;margin:0 auto">${esc(String(msg))}</p>
+      <pre class="muted small" style="word-break:break-word;max-width:640px;margin:12px auto 0;text-align:left;white-space:pre-wrap;background:#f8fafc;padding:12px;border-radius:8px">${esc(stack.split("\n").slice(0, 4).join("\n"))}</pre>
+      <button class="btn btn-primary" style="margin-top:14px" onclick="location.reload()">Reload</button>
+    </div></div>`;
+  }
 }
 
 window.addEventListener("hashchange", navigate);
 
 // Surface any uncaught error instead of silently blanking the app
-window.addEventListener("error", (e) => {
-  const el = $("#view");
-  if (el) el.innerHTML = `<div class="card" style="margin:20px"><div class="empty"><div class="big">⚠️</div><h3>Something went wrong</h3><p class="muted">${esc(e.message || "Unknown error")}</p><button class="btn btn-primary" onclick="location.reload()">Reload</button></div></div>`;
-});
-window.addEventListener("unhandledrejection", (e) => {
-  const reason = (e.reason && (e.reason.message || e.reason)) || "Unknown error";
-  const el = $("#view");
-  if (el) el.innerHTML = `<div class="card" style="margin:20px"><div class="empty"><div class="big">⚠️</div><h3>Something went wrong</h3><p class="muted">${esc(String(reason))}</p><button class="btn btn-primary" onclick="location.reload()">Reload</button></div></div>`;
-});
+window.addEventListener("error", (e) => showFatal(e));
+window.addEventListener("unhandledrejection", (e) => showFatal(e.reason));
 
 // ---------------- Boot ----------------
 async function boot() {
@@ -262,7 +281,7 @@ async function renderInvoices() {
         <td class="num">${fmtMoney(i.total)}</td>
         <td class="num small">${i.paid_amount > 0 ? fmtMoney(i.paid_amount) : "—"}</td>
         <td><span class="badge ${i.status}">${i.status}</span></td>
-      </tr>`).join("") : `<tr><td colspan="7" class="empty"><div class="big">🗂️</div>No invoices found</td></tr>`;
+      </tr>`).join("") : `<tr><td colspan="7" class="empty"><div class="big">🗂️</div><h3>No invoices found</h3><p class="muted">Create your first invoice to get started.</p><a class="btn btn-primary" href="#/invoice/new" style="margin-top:12px">+ Create Invoice</a></td></tr>`;
     $("#inv-rows").innerHTML = rows;
   };
 
@@ -724,8 +743,9 @@ async function renderQuoteView(args) {
       <h3 style="margin-bottom:12px">Line items</h3>
       <div class="table-wrap"><table><thead><tr><th>SL</th><th>Item Description</th><th class="num">Quantity</th><th class="num">Price Before VAT</th><th class="num">${state.company?.vat_rate ?? 5}% VAT</th><th class="num">Total Amount</th></tr></thead><tbody>${itemsHtml}</tbody></table></div>
       <div class="totals-box"><div class="totals">
-        <div class="t-row"><span class="muted">Subtotal</span><span>${fmtMoney(q.subtotal)}</span></div>
-        <div class="t-row"><span class="muted">VAT</span><span>${fmtMoney(q.tax_amount)}</span></div>
+        <div class="t-row"><span class="muted">Amount Before VAT</span><span>${fmtMoney(q.subtotal)}</span></div>
+        <div class="t-row"><span class="muted">VAT Amount (${state.company?.vat_rate ?? 5}%)</span><span>${fmtMoney(q.tax_amount)}</span></div>
+        <div class="t-row"><span class="muted">Amount With VAT</span><span>${fmtMoney(Number(q.subtotal) + Number(q.tax_amount))}</span></div>
         ${Number(q.discount) ? `<div class="t-row"><span class="muted">Discount</span><span>− ${fmtMoney(q.discount)}</span></div>` : ""}
         <div class="t-row grand"><span>Total</span><span>${fmtMoney(q.total)}</span></div>
       </div></div>
@@ -755,6 +775,7 @@ async function renderCustomers() {
         <td class="small mono">${esc(c.trn || "—")}</td>
         <td class="num" style="color:${c.balance > 0 ? "var(--amber)" : "var(--green)"}">${c.balance > 0 ? fmtMoney(c.balance) : "—"}</td>
         <td><div class="row-actions"><button class="btn btn-sm" onclick="openCustomerModal(${c.id})">Edit</button>
+        <button class="btn btn-sm" onclick="location.hash='#/statement/${c.id}'">Statement</button>
         <button class="btn btn-sm btn-danger" onclick="deleteCustomer(${c.id})">Del</button></div></td></tr>`).join("")
       : `<tr><td colspan="6" class="empty"><div class="big">👥</div>No customers yet</td></tr>`}</tbody></table></div></div>`;
 }
@@ -963,6 +984,138 @@ async function deleteExpense(id) {
   if (!confirm("Delete this expense?")) return;
   try { await api("/expenses/" + id, { method: "DELETE" }); toast("Expense deleted"); renderExpenses(); }
   catch (e) { toast(e.message, "error"); }
+}
+
+// ================= STATEMENTS =================
+async function renderStatement(args) {
+  const preselected = args[0] ? Number(args[0]) : null;
+  const customers = (await api("/customers")).customers;
+  const view = $("#view");
+  view.innerHTML = `
+    <div class="page-head">
+      <div><h2>Customer Statements</h2><div class="sub">Generate a statement of account to send to a customer</div></div>
+    </div>
+    <div class="card" style="max-width:900px">
+      <div class="toolbar">
+        <div class="searchbar">
+          <label class="small">Customer</label>
+          <select id="st-customer">${customers.map((c) => `<option value="${c.id}" ${preselected === c.id ? "selected" : ""}>${esc(c.name)}${c.company_name ? " — " + esc(c.company_name) : ""}</option>`).join("")}</select>
+          <label class="small">From</label><input type="date" id="st-from" value="${firstOfYear()}">
+          <label class="small">To</label><input type="date" id="st-to" value="${today()}">
+          <button class="btn btn-sm btn-primary" onclick="loadStatement()">Generate</button>
+          <button class="btn btn-sm" onclick="printStatement()">🖨 Print / PDF</button>
+        </div>
+      </div>
+      <div id="statement-body"></div>
+    </div>`;
+  window._stmt = { from: $("#st-from").value, to: $("#st-to").value };
+  loadStatement();
+}
+
+async function loadStatement() {
+  const customer_id = $("#st-customer").value;
+  const from = $("#st-from").value, to = $("#st-to").value;
+  window._stmt = { customer_id, from, to };
+  const d = await api(`/reports/statement?customer_id=${customer_id}&from=${from}&to=${to}`);
+  const cust = d.customer;
+  const rows = d.transactions.map((t) => `
+    <tr>
+      <td class="small">${esc(t.date)}</td>
+      <td>${esc(t.desc)}<div class="muted small mono">${esc(t.ref || "")}</div></td>
+      <td class="num">${t.debit ? fmtMoney(t.debit) : ""}</td>
+      <td class="num">${t.credit ? fmtMoney(t.credit) : ""}</td>
+      <td class="num" style="font-weight:600">${fmtMoney(t.balance)}</td>
+    </tr>`).join("");
+  $("#statement-body").innerHTML = `
+    <div class="grid grid-3" style="margin:12px 0 16px">
+      <div class="stat"><span class="label">Customer</span><span class="value" style="font-size:16px">${esc(cust.name)}</span><span class="delta muted">${esc(cust.company_name || "")}</span></div>
+      <div class="stat"><span class="label">Opening Balance</span><span class="value" style="font-size:16px">${fmtMoney(d.opening_balance)}</span></div>
+      <div class="stat"><span class="label">Closing Balance</span><span class="value" style="font-size:16px;color:${d.closing_balance > 0 ? "var(--amber)" : "var(--green)"}">${fmtMoney(d.closing_balance)}</span></div>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>Date</th><th>Description</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="5" class="muted">No transactions in this period</td></tr>`}</tbody></table></div>`;
+}
+
+async function printStatement() {
+  const { customer_id, from, to } = window._stmt || {};
+  if (!customer_id) { toast("Select a customer first", "error"); return; }
+  const d = await api(`/reports/statement?customer_id=${customer_id}&from=${from}&to=${to}`);
+  const comp = (await api("/settings")).company;
+  const cust = d.customer;
+  const brand = comp?.name || "My Company LLC";
+  const tagline = comp?.tagline || "";
+  const rows = d.transactions.map((t) => `
+    <tr>
+      <td>${esc(t.date)}</td>
+      <td>${esc(t.desc)}${t.ref ? ' <span class="ref">' + esc(t.ref) + "</span>" : ""}</td>
+      <td class="num">${t.debit ? fmtMoney(t.debit) : ""}</td>
+      <td class="num">${t.credit ? fmtMoney(t.credit) : ""}</td>
+      <td class="num">${fmtMoney(t.balance)}</td>
+    </tr>`).join("");
+  const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Statement - ' + esc(cust.name) + '</title><style>' +
+    '*{margin:0;padding:0;box-sizing:border-box}' +
+    'body{font-family:"Segoe UI",-apple-system,Arial,sans-serif;color:#1a202c;font-size:13px;background:#fff}' +
+    '.page{max-width:820px;margin:0 auto}' +
+    '.header{background:linear-gradient(135deg,#0c3740 0%,#0a4a54 45%,#037c84 100%);color:#fff;padding:24px 40px;position:relative;overflow:hidden}' +
+    '.header-top{display:flex;align-items:center;gap:18px}' +
+    '.logo-box{background:#fff;border-radius:10px;padding:8px 12px;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.15)}' +
+    '.logo-box img{height:52px;width:auto;display:block}' +
+    '.doc-type{font-size:30px;font-weight:800;letter-spacing:2px;line-height:1}' +
+    '.brand{font-size:16px;font-weight:700;margin-top:6px}' +
+    '.tagline{font-size:11px;opacity:.9;margin-top:2px;letter-spacing:1.5px;text-transform:uppercase}' +
+    '.trn-chip{display:inline-block;margin-top:10px;font-size:10px;letter-spacing:.5px;background:rgba(255,255,255,.14);padding:4px 10px;border-radius:20px}' +
+    '.body{padding:30px 40px}' +
+    '.label{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#037c84;font-weight:800;margin-bottom:6px}' +
+    '.info-row{display:flex;justify-content:space-between;gap:30px;margin-bottom:24px}' +
+    '.bill-to .name{font-size:16px;font-weight:700}' +
+    '.bill-to .dim{color:#64748b;margin-top:2px}' +
+    '.meta{text-align:right}' +
+    '.m-row{display:flex;justify-content:space-between;gap:16px;padding:3px 0;border-bottom:1px dashed #e2e8f0;min-width:220px}' +
+    '.m-row .k{color:#64748b}' +
+    '.m-row .v{font-weight:700}' +
+    'table{width:100%;border-collapse:collapse;margin-top:8px}' +
+    'table thead th{background:#0c3740;color:#fff;padding:10px 14px;font-size:11px;text-transform:uppercase;letter-spacing:.7px;text-align:left}' +
+    'table thead th.num,table td.num{text-align:right}' +
+    'table td{padding:10px 14px;border-bottom:1px solid #e2e8f0}' +
+    'table tbody tr:nth-child(even){background:#f8fafc}' +
+    '.ref{color:#64748b;font-size:11px}' +
+    '.summary{display:flex;justify-content:flex-end;margin-top:18px}' +
+    '.summary-box{width:280px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden}' +
+    '.sb-head{background:#037c84;color:#fff;font-size:11px;font-weight:800;letter-spacing:1.5px;padding:9px 16px;text-transform:uppercase}' +
+    '.s-row{display:flex;justify-content:space-between;padding:9px 16px;font-size:13px;border-top:1px solid #f1f5f9}' +
+    '.s-row span:first-child{color:#475569}' +
+    '.s-row.big{font-size:16px;font-weight:800;color:#0c3740;border-top:2px solid #0c3740}' +
+    '.s-row.big span:last-child{color:#037c84}' +
+    '.footer{background:#0c3740;color:#d7f0f2;text-align:center;padding:16px 40px;font-size:11px;letter-spacing:.4px;margin-top:36px}' +
+    '.footer strong{color:#fff}' +
+    '@media print{.page{max-width:none}}' +
+    '</style></head><body><div class="page">' +
+    '<div class="header"><div class="header-top"><div class="logo-box"><img src="/logo.png"></div>' +
+    '<div><div class="doc-type">STATEMENT OF ACCOUNT</div><div class="brand">' + esc(brand) + '</div>' +
+    (tagline ? '<div class="tagline">' + esc(tagline) + '</div>' : "") +
+    (comp?.trn ? '<div class="trn-chip">TRN: ' + esc(comp.trn) + '</div>' : "") + '</div></div></div>' +
+    '<div class="body">' +
+    '<div class="info-row"><div class="bill-to"><div class="label">Customer</div>' +
+    '<div class="name">' + esc(cust.name) + '</div>' +
+    (cust.company_name ? '<div class="dim">' + esc(cust.company_name) + '</div>' : "") +
+    (cust.address ? '<div class="dim">' + esc(cust.address) + '</div>' : "") +
+    (cust.trn ? '<div class="dim">TRN: ' + esc(cust.trn) + '</div>' : "") +
+    '</div><div class="meta"><div class="label">Statement Details</div>' +
+    '<div class="m-row"><span class="k">Period</span><span class="v">' + from + ' → ' + to + '</span></div>' +
+    '<div class="m-row"><span class="k">Statement Date</span><span class="v">' + today() + '</span></div>' +
+    '<div class="m-row"><span class="k">Currency</span><span class="v">' + esc(d.currency) + '</span></div>' +
+    '</div></div>' +
+    '<table><thead><tr><th>Date</th><th>Description</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>' +
+    '<tbody>' + (rows || '<tr><td colspan="5">No transactions</td></tr>') + '</tbody></table>' +
+    '<div class="summary"><div class="summary-box"><div class="sb-head">Summary</div>' +
+    '<div class="s-row"><span>Opening Balance</span><span>' + fmtMoney(d.opening_balance) + '</span></div>' +
+    '<div class="s-row big"><span>Closing Balance</span><span>' + fmtMoney(d.closing_balance) + '</span></div>' +
+    '</div></div></div>' +
+    '<div class="footer"><strong>' + esc(brand) + '</strong> · Thank you for your business!</div>' +
+    '</div><script>window.onload=function(){window.print();}</script></body></html>';
+  const w = window.open("", "_blank");
+  w.document.write(html);
+  w.document.close();
 }
 
 // ================= REPORTS =================
@@ -1255,13 +1408,16 @@ async function printDoc(type, id) {
     '*{margin:0;padding:0;box-sizing:border-box}' +
     'body{font-family:"Segoe UI",-apple-system,Arial,sans-serif;color:#1a202c;font-size:13px;background:#fff}' +
     '.page{max-width:820px;margin:0 auto}' +
-    '.header{background:linear-gradient(135deg,#0c3740 0%,#0a4a54 45%,#037c84 100%);color:#fff;padding:30px 40px 28px;position:relative;overflow:hidden}' +
+    '.header{background:linear-gradient(135deg,#0c3740 0%,#0a4a54 45%,#037c84 100%);color:#fff;padding:24px 40px;position:relative;overflow:hidden}' +
+    '.header-top{display:flex;align-items:center;gap:18px;position:relative;z-index:1}' +
+    '.logo-box{background:#fff;border-radius:10px;padding:8px 12px;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.15)}' +
+    '.logo-box img{height:52px;width:auto;display:block}' +
     '.header:after{content:"";position:absolute;right:-60px;top:-60px;width:220px;height:220px;border-radius:50%;background:rgba(255,255,255,.06)}' +
     '.header:before{content:"";position:absolute;right:60px;top:40px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,.05)}' +
-    '.doc-type{font-size:36px;font-weight:800;letter-spacing:2px;line-height:1}' +
-    '.brand{font-size:17px;font-weight:700;margin-top:8px}' +
-    '.tagline{font-size:11px;opacity:.9;margin-top:3px;letter-spacing:1.5px;text-transform:uppercase}' +
-    '.trn-chip{display:inline-block;margin-top:12px;font-size:10px;letter-spacing:.5px;background:rgba(255,255,255,.14);padding:4px 10px;border-radius:20px}' +
+    '.doc-type{font-size:32px;font-weight:800;letter-spacing:2px;line-height:1}' +
+    '.brand{font-size:16px;font-weight:700;margin-top:6px}' +
+    '.tagline{font-size:11px;opacity:.9;margin-top:2px;letter-spacing:1.5px;text-transform:uppercase}' +
+    '.trn-chip{display:inline-block;margin-top:10px;font-size:10px;letter-spacing:.5px;background:rgba(255,255,255,.14);padding:4px 10px;border-radius:20px}' +
     '.body{padding:30px 40px}' +
     '.info-row{display:flex;justify-content:space-between;gap:30px}' +
     '.bill-to{flex:1}' +
@@ -1296,11 +1452,12 @@ async function printDoc(type, id) {
     '.footer strong{color:#fff}' +
     '@media print{.page{max-width:none}}' +
     '</style></head><body><div class="page">' +
-    '<div class="header"><div class="doc-type">' + docType + '</div>' +
+    '<div class="header"><div class="header-top"><div class="logo-box"><img src="/logo.png"></div>' +
+    '<div><div class="doc-type">' + docType + '</div>' +
     '<div class="brand">' + esc(brand) + '</div>' +
     (tagline ? '<div class="tagline">' + esc(tagline) + '</div>' : "") +
     (comp?.trn ? '<div class="trn-chip">TRN: ' + esc(comp.trn) + '</div>' : "") +
-    '</div>' +
+    '</div></div></div>' +
     '<div class="body">' +
     '<div class="info-row"><div class="bill-to"><div class="label">Invoice To</div>' + custLines + '</div>' +
     '<div class="meta">' + metaRows + '</div></div>' +
@@ -1335,6 +1492,7 @@ Object.assign(window, {
   setInvoiceStatus, deletePayment, convertQuote, openTermsModal, saveTerms, openUserModal, saveUser, deleteUser,
   openExpenseModal, saveExpense, deleteExpense,
   saveSettings, showReport, loadSalesReport, loadPLReport, printPL, printDoc,
+  loadStatement, printStatement,
 });
 
 boot();

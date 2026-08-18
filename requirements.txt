@@ -1,1 +1,3 @@
 # QuickInvoice has zero external dependencies.
+# This file exists so Render's build step (pip install -r requirements.txt)
+# succeeds. No packages are required — everything uses the Python standard library.

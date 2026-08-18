@@ -1,0 +1,76 @@
+# MAKE QUICKINVOICE LIVE — 10 MINUTES, FREE, ALWAYS-ON
+
+Use **Render.com** (free tier). No credit card. No computer needed after setup.
+Your app needs ZERO dependencies, so this is very simple.
+
+================================================================
+STEP 1 — Prepare your files (already done for you)
+================================================================
+You have the app files in the `invoice-app` folder:
+    server.py          (the whole backend)
+    static/            (the web interface)
+That's all you need. (The `.bat`/`.sh` files are only for running locally.)
+
+================================================================
+STEP 2 — Create a Render account
+================================================================
+1. Go to  https://render.com
+2. Click "Get Started" / "Sign up".
+3. Sign up with GitHub OR just your email. (Email is fine.)
+
+================================================================
+STEP 3 — Create the web service
+================================================================
+1. Log in, click the "+ New" button (top right).
+2. Choose "Web Service".
+3. Render will ask for a repository. If you have a GitHub account,
+   the easiest way:
+     a. Create a new GitHub repo (https://github.com/new) named
+        "quickinvoice" — make it PRIVATE.
+     b. Upload these files to it:  server.py  and the  static/  folder.
+     c. Back on Render, connect your GitHub and select that repo.
+   If you do NOT want GitHub, use "Deploy from a public Git repository"
+   or "Upload" instead.
+
+4. On the service settings screen, fill in ONLY these:
+     Name:         quickinvoice        (any name you like)
+     Build command:     (leave EMPTY)
+     Start command:     python3 server.py
+     Instance type:     Free
+
+5. Scroll down to "Advanced":
+     Add a Persistent Disk.
+       Mount path:  /opt/render/project/src
+       Size:        1 GB   (this keeps your database saved between restarts)
+
+6. Click "Create Web Service".
+
+================================================================
+STEP 4 — Open your live site
+================================================================
+Render will build (1–2 minutes) and give you a URL like:
+     https://quickinvoice.onrender.com
+
+Open it → sign in:
+     Email:    admin@quickinvoice.com
+     Password: Miraj@2026
+
+THAT'S IT — your software is now LIVE, on the internet, always on.
+Open the same URL from your phone or anywhere in the world.
+
+================================================================
+IMPORTANT NOTES
+================================================================
+• Change the admin password immediately (Settings → Users → Edit).
+• FREE TIER: the site sleeps after ~15 min of no use, then wakes in
+  ~30–60 seconds on the next visit. (Paid tier $7/mo keeps it always
+  instantly on — optional.)
+• Your data is saved in the Persistent Disk, so nothing is lost.
+
+================================================================
+ALTERNATIVE (if you prefer to keep it on YOUR computer):
+================================================================
+Install Cloudflare Tunnel (free) and run:
+    cloudflared tunnel --url http://localhost:8000
+It prints a public link like https://xxxx.trycloudflare.com — open it
+from anywhere. (Your computer must stay on.)

@@ -17,7 +17,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "quickinvoice.db")
+# On Render (and other hosts), DB_PATH can point at the mounted persistent disk
+# so your data survives restarts. Locally it defaults to the app folder.
+DB_PATH = os.environ.get("DB_PATH", os.path.join(BASE_DIR, "quickinvoice.db"))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 PORT = int(os.environ.get("PORT", 8000))
 
@@ -215,7 +217,8 @@ def init_db():
     # Seed admin + demo data on first run
     if c.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
         now = now_iso()
-        admin_hash = hash_password("admin123")
+        admin_pw = os.environ.get("ADMIN_PASSWORD", "admin123")
+        admin_hash = hash_password(admin_pw)
         staff_hash = hash_password("staff123")
         c.execute("INSERT INTO users(name,email,password_hash,role,created_at) VALUES(?,?,?,?,?)",
                   ("Admin", "admin@quickinvoice.com", admin_hash, "admin", now))
@@ -1202,6 +1205,53 @@ class Handler(BaseHTTPRequestHandler):
                 "expenses_by_cat": expenses_by_cat,
                 "total_expenses": round(total_expenses, 2),
                 "net_profit": round(net_profit, 2),
+                "currency": comp.get("currency", "AED"),
+            })
+        if rid == "statement":
+            # Customer statement of account for a date range
+            customer_id = self.qparam("customer_id")
+            from_date = self.qparam("from") or "0000-01-01"
+            to_date = self.qparam("to") or "9999-12-31"
+            cust = c.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
+            if not cust:
+                return self.send_json({"error": "Customer not found"}, 404)
+            invs_before = c.execute(
+                "SELECT id, total FROM invoices WHERE customer_id=? AND issue_date < ? "
+                "AND status NOT IN ('cancelled','draft')", (customer_id, from_date)).fetchall()
+            opening = 0.0
+            for inv in invs_before:
+                opening += float(inv["total"]) - invoice_paid_amount(conn, inv["id"])
+            invoices = c.execute(
+                "SELECT * FROM invoices WHERE customer_id=? AND issue_date BETWEEN ? AND ? "
+                "AND status NOT IN ('cancelled','draft') ORDER BY issue_date, id",
+                (customer_id, from_date, to_date)).fetchall()
+            payments = c.execute(
+                "SELECT p.*, i.number AS inv_number FROM payments p JOIN invoices i ON i.id=p.invoice_id "
+                "WHERE i.customer_id=? AND p.date BETWEEN ? AND ? ORDER BY p.date, p.id",
+                (customer_id, from_date, to_date)).fetchall()
+            txs = []
+            for inv in invoices:
+                txs.append({"date": inv["issue_date"], "type": "invoice", "ref": inv["number"],
+                            "desc": "Invoice", "debit": float(inv["total"]), "credit": 0.0,
+                            "status": inv["status"]})
+            for p in payments:
+                ref = (p["reference"] + " (" + p["inv_number"] + ")") if p["reference"] else p["inv_number"]
+                txs.append({"date": p["date"], "type": "payment", "ref": ref,
+                            "desc": "Payment (" + str(p["method"]).replace("_", " ") + ")",
+                            "debit": 0.0, "credit": float(p["amount"]), "status": ""})
+            txs.sort(key=lambda t: (t["date"], 0 if t["type"] == "invoice" else 1))
+            balance = opening
+            for t in txs:
+                balance += t["debit"] - t["credit"]
+                t["balance"] = round(balance, 2)
+            closing = round(balance, 2)
+            return self.send_json({
+                "customer": dict(cust),
+                "from": from_date,
+                "to": to_date,
+                "opening_balance": round(opening, 2),
+                "closing_balance": closing,
+                "transactions": txs,
                 "currency": comp.get("currency", "AED"),
             })
         return self.send_json({"error": "Not found"}, 404)
