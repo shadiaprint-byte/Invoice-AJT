@@ -1,0 +1,1 @@
+# QuickInvoice has zero external dependencies.
